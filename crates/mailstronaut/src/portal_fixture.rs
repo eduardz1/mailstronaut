@@ -128,6 +128,58 @@ impl Chooser {
     }
 }
 
+/// Examines the actual descriptor from OpenURI.OpenFile on the synthetic session bus.
+struct FileOpener(Chooser);
+
+#[zbus::interface(name = "org.freedesktop.portal.OpenURI")]
+impl FileOpener {
+    #[zbus(property, name = "version")]
+    #[expect(
+        clippy::unused_self,
+        reason = "zbus requires an instance property getter."
+    )]
+    fn version(&self) -> u32 {
+        5
+    }
+
+    #[zbus(name = "OpenFile")]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "The D-Bus header and options are decoded by value."
+    )]
+    fn open_file(
+        &self,
+        parent: &str,
+        fd: zbus::zvariant::OwnedFd,
+        options: HashMap<String, OwnedValue>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &Connection,
+    ) -> fdo::Result<OwnedObjectPath> {
+        use std::io::Read as _;
+        let _ = parent;
+        let mut file = std::fs::File::from(std::os::fd::OwnedFd::from(fd));
+        if !options
+            .get("ask")
+            .and_then(|v| bool::try_from(v).ok())
+            .unwrap_or(false)
+            || options.contains_key("writable")
+            || options.contains_key("writeable")
+            || file.write(b"x").is_ok()
+        {
+            return Err(fdo::Error::Failed(
+                "Expected a read-only descriptor and an application chooser".into(),
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|_| fdo::Error::Failed("Read synthetic descriptor".into()))?;
+        std::fs::write(self.0.0.join("opened-bytes"), bytes)
+            .map_err(|_| fdo::Error::Failed("Record synthetic bytes".into()))?;
+        self.0
+            .answer("OpenAttachment", &options, &header, connection)
+    }
+}
+
 /// Records what the application asks the desktop to show.
 struct Notifier(PathBuf);
 
@@ -314,6 +366,11 @@ async fn serve_portals() {
             Chooser(root.clone(), tokio::runtime::Handle::current()),
         )
         .expect("file chooser")
+        .serve_at(
+            PORTAL_PATH,
+            FileOpener(Chooser(root.clone(), tokio::runtime::Handle::current())),
+        )
+        .expect("attachment opener")
         .serve_at(PORTAL_PATH, Notifier(root.clone()))
         .expect("notifications")
         .serve_at(

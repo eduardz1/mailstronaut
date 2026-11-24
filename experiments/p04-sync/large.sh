@@ -121,7 +121,8 @@ await 'the text of the large message is searchable' 1 "SELECT count(*) FROM mess
 sleep 2
 capture listed
 
-requests() { wc -l < "$artifacts/chooser-requests.jsonl" 2> /dev/null || echo 0; }
+touch "$artifacts/chooser-requests.jsonl"
+requests() { wc -l < "$artifacts/chooser-requests.jsonl"; }
 # Answer the next dialog, click, and wait until the dialog has been asked.
 choose() {
   local answer=$1 x=$2 y=$3 before
@@ -152,14 +153,17 @@ await_file() {
 click 350 380
 sleep 1.5
 capture large-opened
+[[ ! -e $artifacts/opened-bytes ]]
 await 'opening it marked it read' 1 "SELECT count(*) FROM effective_memberships s JOIN messages m ON m.id=s.message_id WHERE s.seen=1 AND m.subject='Rapport énorme'"
 
 # Saving it with the real button: the attachment comes from the server only now.
-sessions=$(grep -c 'Logged in' "$dovecot_root/dovecot.log" || true)
-(( sessions > 0 ))
+# Count transfers of the large part. The background Seen/IDLE sessions can
+# legitimately sign in while the application chooser is open.
+large_transfers() { grep -Ec 'body_bytes=[1-9][0-9]{7,}' "$dovecot_root/dovecot.log" || true; }
+[[ $(large_transfers) == 0 ]]
 choose cancel 708 412
 sleep 2
-[[ $(grep -c 'Logged in' "$dovecot_root/dovecot.log" || true) == "$sessions" ]]
+[[ $(large_transfers) == 0 ]]
 printf '%s\n' 'OK: a cancelled save asked the server for nothing'
 choose deny 708 412
 sleep 2
@@ -176,7 +180,19 @@ assert last == {"method": "SaveFile", "suggested": "rapport-huge.pdf"}, last
 print("OK: the dialog suggested the decoded file name")
 PY
 sleep 1
+[[ $(large_transfers) == 1 ]]
 capture saved
+
+# Open uses a read-only descriptor on the application chooser. It must never
+# hand off the sender's path or implicitly open a file when it is merely listed.
+preview_count() { find "$XDG_RUNTIME_DIR" -maxdepth 1 -type f -name 'mailstronaut-attachment-*' | wc -l; }
+[[ $(preview_count) == 0 ]]
+choose "file://$saved" 1200 412
+await_file 'Open handed the exact on-demand part to the application chooser' "$artifacts/opened-bytes" "$large_digest"
+[[ $(preview_count) == 1 ]]
+swaymsg seat seat0 cursor set 562 650 > /dev/null
+sleep 1
+capture opened-remote-attachment
 
 # The middle row keeps its attachment on this device, listed the ordinary way.
 click 350 260
@@ -185,6 +201,17 @@ capture medium-opened
 kept="$artifacts/saved-medium.pdf"
 choose "file://$kept" 708 365
 await_file 'saving the kept attachment wrote it byte for byte' "$kept" "$medium_digest"
+choose deny 1200 365
+await_file 'the refused chooser received only the selected local content' "$artifacts/opened-bytes" "$medium_digest"
+for _ in {1..50}; do [[ $(preview_count) == 1 ]] && break; sleep .1; done
+[[ $(preview_count) == 1 ]]
+choose "file://$kept" 1200 365
+sleep .4
+[[ $(preview_count) == 2 ]]
+choose "file://$kept" 1200 365
+sleep .4
+[[ $(preview_count) == 2 ]]
+capture opened-cached-attachment
 
 # Hold the private chooser before it can answer Save. Remove the account and
 # observe the new theme before releasing the old chooser's successful response.
@@ -213,6 +240,8 @@ sleep 2
 [[ $(grep -c 'Logged in' "$dovecot_root/dovecot.log") == "$sessions" ]]
 printf '%s\n' 'OK: a retired attachment save neither signed in nor overwrote its destination'
 close_window
+[[ $(preview_count) == 0 ]]
+printf '%s\n' 'OK: refusal released its preview, repeated Open reused the file and quitting removed the previews'
 
 if grep -l "$imap_password" "$artifacts"/*-app.log > /dev/null; then
   printf '%s\n' 'Synthetic credential appeared in an application log' >&2; exit 1

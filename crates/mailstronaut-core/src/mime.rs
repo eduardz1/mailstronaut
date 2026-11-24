@@ -6,6 +6,12 @@ use mail_parser::{AddressList, MessageParser, MessagePart, PartFlags, PartKind};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
+/// Content identity for a complete MIME source or an explicitly extracted attachment.
+#[must_use]
+pub fn content_digest(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
 /// Maximum accepted original message size.
 pub const MAX_INPUT_BYTES: usize = 8 * 1024 * 1024;
 /// Maximum parsed parts, including nested messages.
@@ -180,7 +186,7 @@ impl Projection {
         if self.original.len() > MAX_INPUT_BYTES
             || self.status.parts_truncated
             || self.status.attachments_truncated
-            || <[u8; 32]>::from(Sha256::digest(&self.original)) != self.revision
+            || content_digest(&self.original) != self.revision
         {
             return Err(Error::InlineResources);
         }
@@ -259,8 +265,7 @@ impl Projection {
     /// descriptor and invalid transfer encoding.
     pub fn attachment_bytes(&self, index: usize) -> Result<Vec<u8>, Error> {
         let descriptor = self.attachments.get(index).ok_or(Error::InlineResources)?;
-        if self.original.len() > MAX_INPUT_BYTES
-            || <[u8; 32]>::from(Sha256::digest(&self.original)) != self.revision
+        if self.original.len() > MAX_INPUT_BYTES || content_digest(&self.original) != self.revision
         {
             return Err(Error::InlineResources);
         }
@@ -473,7 +478,7 @@ pub fn project(raw: &[u8]) -> Result<Projection, Error> {
         .max_encoded_nesting(0)
         .parse(raw)
         .ok_or(Error::Unparseable)?;
-    let revision: [u8; 32] = Sha256::digest(raw).into();
+    let revision = content_digest(raw);
     let mut status = Status::default();
     let headers = Headers {
         message_id: header(message.message_id(), &mut status.headers_truncated, false),

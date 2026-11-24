@@ -48,6 +48,23 @@ application's real code runs all the way through GPUI's portal client.
 headers, encoded names, a message with no readable text, the store's size limit, and decoding
 base64, quoted-printable and unencoded parts.
 
+## Opening a received attachment
+
+The reader offers separate, named Save and Open controls. Open decodes the selected cached
+part or fetches the selected IMAP section on demand. The desktop application chooser receives
+a read-only file descriptor with the application-choice option. The preview has a random
+name in the private runtime directory and owner-read-only permissions. Repeated opens of
+identical bytes reuse the preview. Successful handoffs keep it available through window
+changes until the process exits. A refused request releases its new copy. The application
+limits successful previews to 64 files and 128 MiB in total.
+
+The private Sway and Dovecot fixture checked the exact bytes from the descriptor for the
+30 MiB remote attachment and the 5 MiB cached attachment. The mock service checked that
+writing through the descriptor failed. The fixture also exercised cancellation of Save,
+refusal of Open, repeat Open, and file removal on exit. Both named controls used the same
+GPUI Kit attachment card. The platform chooser and external viewers on a real desktop
+remain to be verified. [Native reader screenshot](artifacts/p07-attachment-open/reader-open.png).
+
 ## Not established
 
 A real desktop's file chooser, and a slow or interrupted download: a failed transfer simply
