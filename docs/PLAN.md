@@ -596,8 +596,9 @@ Use the [composer/action component mapping](INTERFACE.md#p07-composition-and-act
   Sent copy stays pending during an outage, is never resubmitted and is saved once by the
   next sync [natively against Dovecot](evidence/P07-native-compose.md); provider-side Sent
   saving is not exercised.
-- [ ] Port native flag/undo controls and implement safe archive/trash/move with
+- [x] Port native flag/undo controls and implement safe archive/trash/move with
   pending operations, UID MOVE/UIDPLUS fallbacks and no unrelated global EXPUNGE.
+  [Combined native move and Undo acceptance](evidence/P07-move-acceptance.md).
   Reuse `Toolbar`/`ToolbarGroup`, `Button`, `DropdownButton`/`PopupMenu` and
   `ContextMenuExt`; use searchable `Combobox` for move destinations and explicit
   in-app `Notification::action` for Undo. Keep durable errors beyond toast lifetime.
